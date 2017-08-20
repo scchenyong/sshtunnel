@@ -1,13 +1,12 @@
 # sshtunnel
 go语言实现的一个SSH隧道端口转发程序
 
-运行命令
+## 运行命令
 ```
 sshtunnel.exe ./config.json
 ```
 
----
-config.json
+## 配置示例
 ```json
 [
 	{
@@ -40,3 +39,13 @@ config.json
 	}
 ]
 ```
+
+## 配置说明
+配置文件采用JSON文件格式，支持多主机和多转发
+- host: 需要开启隧道的主机地址
+- port: 对应主机的SSH协议端口
+- username: 主机访问用户名
+- password: 主机访问密码
+- tunnels: 包含的隧道转发
+	- remote: 开启隧道的远程主机配置
+	- local: 开启隧道映射到本地的配置
