@@ -14,58 +14,32 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type HostConfig struct {
-	Host string
-	Port int32
+type Tunnel struct {
+	Remote string
+	Local  string
 }
 
-type TunnelConfig struct {
-	Remote HostConfig
-	Local  HostConfig
+type SSHTunnel struct {
+	Addr    string
+	User    string
+	Pass    string
+	Tunnels []Tunnel
 }
 
-type SSHConfig struct {
-	HostConfig
-	UserName string
-	Password string
-	Tunnels  []TunnelConfig
-}
-
-type TunnelAddr struct {
-	LocalAddr  string
-	RemoteAddr string
-}
-
-type TunnelConn struct {
-	SSHConn *SSHConn
-	TunnelAddr
-	LocalListener net.Listener
-	LocalConn     net.Conn
-	RemoteConn    net.Conn
-	Number        int
-}
-
-type SSHConn struct {
-	sync.WaitGroup
-	SSHConfig
-	SSHClient *ssh.Client
-}
-
-var SSHConfigs []SSHConfig
+var sts []SSHTunnel
 
 func init() {
 	if len(os.Args) == 1 {
 		log.Println(`请输入配置文件路径参数.`)
 		return
 	}
-	configpath := os.Args[1]
-	configFile, err := ioutil.ReadFile(configpath)
-
+	p := os.Args[1]
+	f, err := ioutil.ReadFile(p)
 	if err != nil {
 		log.Printf(`载入配置文件出错: %s`, err)
 		os.Exit(-1)
 	}
-	err = json.Unmarshal(configFile, &SSHConfigs)
+	err = json.Unmarshal(f, &sts)
 	if nil != err {
 		log.Printf(`解析配置文件内容出错: %s`, err)
 		os.Exit(-1)
@@ -73,128 +47,108 @@ func init() {
 }
 
 func main() {
-	var cwg sync.WaitGroup
-	for _, sshConfig := range SSHConfigs {
-		cwg.Add(1)
-		conn := SSHConn{SSHConfig: sshConfig}
-		go conn.start(cwg)
+	var wg sync.WaitGroup
+	for _, st := range sts {
+		wg.Add(1)
+		go func() {
+			start(st)
+			wg.Done()
+		}()
 	}
-	cwg.Wait()
+	wg.Wait()
 }
 
-func (sc *SSHConn) start(wg sync.WaitGroup) {
-	defer wg.Done()
-
+func start(st SSHTunnel) {
 	var auth []ssh.AuthMethod
 	auth = make([]ssh.AuthMethod, 0)
-	auth = append(auth, ssh.Password(sc.Password))
+	auth = append(auth, ssh.Password(st.Pass))
 
-	sshConfig := &ssh.ClientConfig{
-		User: sc.UserName,
+	sc := &ssh.ClientConfig{
+		User: st.User,
 		Auth: auth,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			return nil
 		},
 	}
-	serverAddr := fmt.Sprintf("%s:%d", sc.Host, sc.Port)
-	sshClientConn, err := ssh.Dial("tcp", serverAddr, sshConfig)
+	scon, err := ssh.Dial("tcp", st.Addr, sc)
 	if err != nil {
 		log.Printf(`连接SSH服务器失败: %s`, err)
 		return
 	}
-	defer sshClientConn.Close()
+	defer scon.Close()
 
-	sc.SSHClient = sshClientConn
-	log.Printf("连接到SSH服务器成功: %s", serverAddr)
+	log.Printf("连接到SSH服务器成功: %s", st.Addr)
 
-	sc.keepalive()
+	go keepalive(scon)
 
-	var twg sync.WaitGroup
-	for _, tunnelConfig := range sc.Tunnels {
-		twg.Add(1)
-
-		tunnelAddr := TunnelAddr{}
-		tunnelAddr.LocalAddr = fmt.Sprintf("%s:%d", tunnelConfig.Local.Host, tunnelConfig.Local.Port)
-		tunnelAddr.RemoteAddr = fmt.Sprintf("%s:%d", tunnelConfig.Remote.Host, tunnelConfig.Remote.Port)
-
-		conn := TunnelConn{}
-		conn.SSHConn = sc
-		conn.TunnelAddr = tunnelAddr
-		conn.Number = 0
-		go conn.connect(twg)
+	var wg sync.WaitGroup
+	for _, t := range st.Tunnels {
+		wg.Add(1)
+		go func(tunnel Tunnel) {
+			connect(scon, tunnel)
+			wg.Done()
+		}(t)
 	}
-	twg.Wait()
+	wg.Wait()
 }
 
-func (tc *TunnelConn) connect(wg sync.WaitGroup) {
-	defer wg.Done()
+func connect(scon *ssh.Client, t Tunnel) {
+	fmt.Println(t.Remote, t.Local)
 
-	fmt.Println(tc.RemoteAddr, tc.LocalAddr)
-
-	localListener, err := net.Listen("tcp", tc.LocalAddr)
+	ll, err := net.Listen("tcp", t.Local)
 	if err != nil {
 		log.Printf(`开启本地TCP端口监听失败: %s`, err)
 		return
 	}
-	defer localListener.Close()
-	tc.LocalListener = localListener
+	sno := 0
 	for {
-		tc.accept()
-	}
-}
-
-func (tc *TunnelConn) accept() {
-	localConn, err := tc.LocalListener.Accept()
-	if err != nil {
-		log.Printf(`接受来自本地的连接失败: %s`, err)
-		return
-	}
-	tc.Number = tc.Number + 1
-	log.Printf(`接受来自本地的连接：%s:%d`, tc.LocalAddr, tc.Number)
-	tc.LocalConn = localConn
-	sshConn, err := tc.SSHConn.SSHClient.Dial("tcp", tc.RemoteAddr)
-	if err != nil {
-		log.Printf(`连接远程服务器失败: %s`, err)
-		return
-	}
-	tc.RemoteConn = sshConn
-	go tc.transfer(tc.Number)
-}
-
-func (tc *TunnelConn) transfer(id int) {
-	go func() {
-		_, err := io.Copy(tc.RemoteConn, tc.LocalConn)
-		if err != nil && err != io.EOF {
-			log.Printf(`上传数据出错: %s`, err)
-		}
-		log.Printf(`断开来自本地的连接：%s:%d`, tc.LocalAddr, id)
-	}()
-	go func() {
-		_, err := io.Copy(tc.LocalConn, tc.RemoteConn)
-		if err != nil && err != io.EOF {
-			log.Printf(`下载数据出错: %s`, err)
-		}
-		log.Printf(`断开来自本地的连接：%s:%d`, tc.LocalAddr, id)
-	}()
-}
-
-func (sc *SSHConn) keepalive() {
-	go func() {
-		sshSession, err := sc.SSHClient.NewSession()
+		lc, err := ll.Accept()
 		if err != nil {
-			log.Printf(`开启SSH会话失败: %s`, err)
+			log.Printf(`接受来自本地的连接失败: %s`, err)
 			return
 		}
-		defer sshSession.Close()
-		write, err := sshSession.StdinPipe()
+		sno = sno + 1
+		cid := fmt.Sprintf("%s <=> %s: %d", t.Local, t.Remote, sno)
+		log.Printf(`接受来自本地的连接：%s `, cid)
+		rc, err := scon.Dial("tcp", t.Remote)
 		if err != nil {
-			log.Println("建立SSH会话通道出错", err)
+			log.Printf(`连接远程服务器失败: %s`, err)
 			return
 		}
-		defer write.Close()
-		for {
-			write.Write([]byte("\n"))
-			time.Sleep(5 * time.Minute)
-		}
+		go transfer(cid, lc, rc)
+	}
+}
+
+func transfer(cid string, lc net.Conn, rc net.Conn) {
+	go func() {
+		io.Copy(rc, lc)
+		log.Printf(`断开上行通道：%s`, cid)
+		lc.Close()
+		rc.Close()
 	}()
+	go func() {
+		io.Copy(lc, rc)
+		log.Printf(`断开下行通道：%s`, cid)
+		rc.Close()
+		lc.Close()
+	}()
+}
+
+func keepalive(scon *ssh.Client) {
+	ss, err := scon.NewSession()
+	if err != nil {
+		log.Printf(`开启SSH会话失败: %s`, err)
+		return
+	}
+	defer ss.Close()
+	w, err := ss.StdinPipe()
+	if err != nil {
+		log.Println("建立SSH会话通道出错", err)
+		return
+	}
+	defer w.Close()
+	for {
+		w.Write([]byte("\n"))
+		time.Sleep(5 * time.Minute)
+	}
 }
