@@ -5,4 +5,4 @@ go:
 
 install: true
 script:
-  - cd cmd/gost && go build
+  - go build
