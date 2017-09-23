@@ -2,14 +2,18 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"sync"
+	"syscall"
+	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 type Tunnel struct {
@@ -52,7 +56,20 @@ func (st *SSHTunnel) Client() (*ssh.Client, error) {
 		return nil, err
 	}
 	log.Printf("连接到服务器成功: %s", st.Addr)
+	go st.keepalive()
 	return st.sshClient, err
+}
+
+func (st *SSHTunnel) keepalive() {
+	t := time.NewTicker(300 * time.Second)
+	defer t.Stop()
+	for {
+		<-t.C
+		_, _, err := st.sshClient.Conn.SendRequest("\n", true, nil)
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (st *SSHTunnel) connect(t Tunnel) {
@@ -66,6 +83,7 @@ func (st *SSHTunnel) connect(t Tunnel) {
 		log.Printf(`断开隧道连接：%s <=> %s`, t.Local, t.Remote)
 	}()
 	log.Printf(`开启隧道：%s <=> %s`, t.Local, t.Remote)
+	sno := 0
 	for {
 		lc, err := ll.Accept()
 		if err != nil {
@@ -84,7 +102,9 @@ func (st *SSHTunnel) connect(t Tunnel) {
 			return
 		}
 		log.Printf(`连接到远程主机 => %s `, t.Remote)
-		go transfer(lc, rc)
+		sno = sno + 1
+		cid := fmt.Sprintf("%s <=> %s: %d", t.Local, t.Remote, sno)
+		go transfer(cid, lc, rc)
 	}
 }
 
@@ -105,8 +125,10 @@ func main() {
 		log.Printf(`解析配置文件内容出错: %s`, err)
 		os.Exit(-1)
 	}
+
 	var wg sync.WaitGroup
 	for _, st := range sts {
+		check(&st)
 		wg.Add(1)
 		go func() {
 			start(st)
@@ -115,6 +137,21 @@ func main() {
 		log.Printf(`启动隧道配置：%s`, st.Addr)
 	}
 	wg.Wait()
+}
+
+func check(st *SSHTunnel) {
+	if len(st.Pass) == 0 {
+		fmt.Printf("请输入登陆密码[%s@%s]:", st.User, st.Addr)
+		bytePassword, _ := terminal.ReadPassword(int(syscall.Stdin))
+		st.Pass = string(bytePassword)
+		fmt.Println()
+	}
+	_, err := st.Client()
+	if nil != err {
+		fmt.Printf("连接主机失败! %s \n", err)
+		st.Pass = ""
+		check(st)
+	}
 }
 
 func start(st SSHTunnel) {
@@ -130,15 +167,17 @@ func start(st SSHTunnel) {
 	wg.Wait()
 }
 
-func transfer(lc net.Conn, rc net.Conn) {
+func transfer(cid string, lc net.Conn, rc net.Conn) {
 	go func() {
 		defer lc.Close()
 		defer rc.Close()
+		log.Printf(`断开上行通道：%s`, cid)
 		io.Copy(rc, lc)
 	}()
 	go func() {
 		defer rc.Close()
 		defer lc.Close()
+		log.Printf(`断开下行通道：%s`, cid)
 		io.Copy(lc, rc)
 	}()
 }
