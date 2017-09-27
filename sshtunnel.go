@@ -104,7 +104,7 @@ func (st *SSHTunnel) connect(t Tunnel) {
 		log.Printf(`连接到远程主机 => %s `, t.Remote)
 		sno = sno + 1
 		cid := fmt.Sprintf("%s <=> %s: %d", t.Local, t.Remote, sno)
-		go transfer(cid, lc, rc)
+		transfer(cid, lc, rc)
 	}
 }
 
@@ -171,13 +171,17 @@ func transfer(cid string, lc net.Conn, rc net.Conn) {
 	go func() {
 		defer lc.Close()
 		defer rc.Close()
-		log.Printf(`断开上行通道：%s`, cid)
-		io.Copy(rc, lc)
+		log.Printf(`连接下行通道：%s`, cid)
+		buf := make([]byte, 2048)
+		io.CopyBuffer(lc, rc, buf)
+		log.Printf(`断开下行通道：%s`, cid)
 	}()
 	go func() {
 		defer rc.Close()
 		defer lc.Close()
-		log.Printf(`断开下行通道：%s`, cid)
-		io.Copy(lc, rc)
+		log.Printf(`连接上行通道：%s`, cid)
+		buf := make([]byte, 2048)
+		io.CopyBuffer(rc, lc, buf)
+		log.Printf(`断开上行通道：%s`, cid)
 	}()
 }
