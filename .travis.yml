@@ -1,0 +1,12 @@
+language: go
+go:
+  - 1.7
+  - 1.8
+  - master
+
+install:
+  - export BUILD_SRC=$HOME/gopath/src
+  - mkdir -p $BUILD_SRC/github.com/qiniu
+  - export TRAVIS_BUILD_DIR=$BUILD_SRC/github.com/251505453/sshtunnel
+  - cd $TRAVIS_BUILD_DIR
+  - go get github.com/251505453/sshtunnel
