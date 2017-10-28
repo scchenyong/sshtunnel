@@ -167,21 +167,30 @@ func start(st SSHTunnel) {
 	wg.Wait()
 }
 
+var copyBufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 10*1024)
+		return &b
+	},
+}
+
 func transfer(cid string, lc net.Conn, rc net.Conn) {
 	go func() {
 		defer lc.Close()
 		defer rc.Close()
 		log.Printf(`连接下行通道：%s`, cid)
-		buf := make([]byte, 2048)
-		io.CopyBuffer(lc, rc, buf)
+		bufp := copyBufPool.Get().(*[]byte)
+		defer copyBufPool.Put(bufp)
+		io.CopyBuffer(lc, rc, *bufp)
 		log.Printf(`断开下行通道：%s`, cid)
 	}()
 	go func() {
 		defer rc.Close()
 		defer lc.Close()
 		log.Printf(`连接上行通道：%s`, cid)
-		buf := make([]byte, 2048)
-		io.CopyBuffer(rc, lc, buf)
+		bufp := copyBufPool.Get().(*[]byte)
+		defer copyBufPool.Put(bufp)
+		io.CopyBuffer(rc, lc, *bufp)
 		log.Printf(`断开上行通道：%s`, cid)
 	}()
 }
