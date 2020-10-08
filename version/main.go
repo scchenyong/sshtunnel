@@ -12,7 +12,11 @@ import (
 
 func main() {
 	var sts []*sshtunnel.Config
-	f, err := ioutil.ReadFile("config.json")
+	p := "config.json"
+	if len(os.Args) == 2 {
+		p = os.Args[1]
+	}
+	f, err := ioutil.ReadFile(p)
 	if err != nil {
 		log.Printf("载入配置文件出错, 错误: %v", err)
 		os.Exit(-1)
