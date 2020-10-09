@@ -13,29 +13,14 @@ import (
 	"time"
 )
 
-type tunnelConnect struct {
-	id int64
-	net.Conn
-	*SSHTunnel
-}
-
-func (t *tunnelConnect) Close() error {
-	t.Conn.Close()
-	t.SSHTunnel.closeConnect(t.id)
-	return nil
-}
-
 type SSHTunnel struct {
 	config   *Config
 	client   *ssh.Client
-	bufPool  *BufferPool
-	connects map[int64]net.Conn
 }
 
 func NewSSHTunnel(config *Config) *SSHTunnel {
 	st := new(SSHTunnel)
 	st.config = config
-	st.connects = make(map[int64]net.Conn)
 	return st
 }
 
@@ -52,10 +37,6 @@ func (st *SSHTunnel) Start() {
 func (st *SSHTunnel) Close() {
 	if nil != st.client {
 		st.client.Close()
-	}
-	for i, conn := range st.connects {
-		conn.Close()
-		delete(st.connects, i)
 	}
 }
 
@@ -120,11 +101,7 @@ func (st *SSHTunnel) connect(t Tunnel) {
 		}
 		sno += 1
 		cid := fmt.Sprintf("%s:%d", tid, sno)
-		go st.transfer(cid, &tunnelConnect{
-			id:        sno,
-			Conn:      lc,
-			SSHTunnel: st,
-		}, rc)
+		go st.transfer(cid, lc, rc)
 	}
 }
 
@@ -163,22 +140,9 @@ func (st *SSHTunnel) transfer(cid string, lc net.Conn, rc net.Conn) {
 	go func() {
 		defer lc.Close()
 		defer rc.Close()
-		st.copy(rc, lc)
+		io.Copy(rc,lc)
 	}()
 	log.Printf("通道[%s]已连接!", cid)
-	st.copy(lc, rc)
+	io.Copy(lc, rc)
 	log.Printf("通道[%s]已断开!", cid)
-}
-
-func (st *SSHTunnel) copy(in, out io.ReadWriter) {
-	if st.bufPool == nil {
-		st.bufPool = NewBufferPool()
-	}
-	buffer := st.bufPool.Get(1024 * 32)
-	defer st.bufPool.Put(buffer)
-	io.CopyBuffer(in, out, buffer)
-}
-
-func (st *SSHTunnel) closeConnect(id int64) {
-	delete(st.connects, id)
 }
