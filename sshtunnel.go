@@ -182,7 +182,7 @@ func (t *SSHTunnel) handleLocalConnect(tid string, cno int64, lc net.Conn, remot
 		return
 	}
 	cid := fmt.Sprintf("%s:%d", tid, cno)
-	go t.transfer(cid, lc, rc)
+	t.transfer(cid, lc, rc)
 }
 
 func (t *SSHTunnel) handleRemoteConnect(tid string, cno int64, rc net.Conn, local string) {
@@ -193,7 +193,7 @@ func (t *SSHTunnel) handleRemoteConnect(tid string, cno int64, rc net.Conn, loca
 		return
 	}
 	cid := fmt.Sprintf("%s:%d", tid, cno)
-	go t.transfer(cid, rc, lc)
+	t.transfer(cid, rc, lc)
 }
 
 func (t *SSHTunnel) setPass() {
