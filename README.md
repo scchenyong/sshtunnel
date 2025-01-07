@@ -15,12 +15,13 @@ sshtunnel.exe ./config.json
 		"pass": "sshpass",
 		"tunnels": [
 			{
-				"remote": "10.0.0.111:80",
-				"local": "0.0.0.0:11180"
+				"isInput": true,
+				"remote": "10.0.0.111:58000",
+				"local": "127.0.0.1:8000"
 			},
 			{
-				"remote": "10.0.0.111:22",
-				"local": "0.0.0.0:11122"
+				"remote": "127.0.0.1:8000",
+				"local": "0.0.0.0:58000"
 			}
 		]
 	}
@@ -33,5 +34,6 @@ sshtunnel.exe ./config.json
 - user: 主机访问用户名
 - pass: 主机访问密码，可选配置（未配置时程序将通过控制台输入）
 - tunnels: 包含的隧道转发
-	- remote: 开启隧道的远程主机配置，格式为【IP地址:端口】
-	- local: 开启隧道映射到本地的配置，格式为【IP地址:端口】
+  - isInput: 开启远端输入，需开启配置/etc/ssh/ssh_config：AllowTcpForwarding=yes,GatewayPorts=yes
+  - remote: 开启隧道的远程主机配置，格式为【IP地址:端口】
+  - local: 开启隧道映射到本地的配置，格式为【IP地址:端口】
