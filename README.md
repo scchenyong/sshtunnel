@@ -16,7 +16,7 @@ sshtunnel.exe ./config.json
 		"tunnels": [
 			{
 				"isInput": true,
-				"remote": "10.0.0.111:58000",
+				"remote": "0.0.0.0:58000",
 				"local": "127.0.0.1:8000"
 			},
 			{
